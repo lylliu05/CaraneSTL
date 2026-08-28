@@ -1,8 +1,11 @@
 ﻿# app/main.py
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.models import AnalyzeRequest, AnalyzeResponse, HealthResponse
 from app.analyzer import STLAnalyzer
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="STL 周期预测服务",
@@ -20,24 +23,17 @@ app.add_middleware(
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(request: AnalyzeRequest):
     try:
-        auto = request.auto_detect if request.auto_detect is not None else True
-        if auto:
-            # 周期扫描选优：自动检测最佳周期
-            result = STLAnalyzer.detect_best_period(
-                request.data,
-                forecast_days=request.forecast_days or 30
-            )
-        else:
-            # 固定周期模式（兼容旧调用）
-            result = STLAnalyzer.analyze(
-                request.data,
-                request.period or 7,
-                request.forecast_days or 30
-            )
+        result = STLAnalyzer.analyze(
+            request.data,
+            request.period or 7,
+            request.forecast_days or 30
+        )
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         return AnalyzeResponse(**result)
     except Exception as e:
+        # 打印完整 traceback 到日志，便于从 Railway 日志定位 500 根因
+        logging.exception("STL /analyze failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health", response_model=HealthResponse)
