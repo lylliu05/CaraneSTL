@@ -6,6 +6,7 @@ class AnalyzeRequest(BaseModel):
     data: List[float]
     period: Optional[int] = 7
     forecast_days: Optional[int] = 30
+    auto_detect: Optional[bool] = True
 
 class AnalyzeResponse(BaseModel):
     period: int
@@ -16,6 +17,7 @@ class AnalyzeResponse(BaseModel):
     forecast: List[float]
     mode: str
     message: str
+    periods_scanned: Optional[List[int]] = None
 
 class HealthResponse(BaseModel):
     status: str

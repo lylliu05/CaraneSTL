@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
-from typing import List
+from typing import List, Optional, Dict
 from app.config import settings
 
 class STLAnalyzer:
@@ -31,6 +31,87 @@ class STLAnalyzer:
         if total_var == 0:
             return 0.0
         return between_var / total_var
+
+    @staticmethod
+    def autocorrelation_at_lag(data: List[float], lag: int) -> float:
+        """计算指定滞后阶数的自相关系数"""
+        arr = np.array(data, dtype=float)
+        n = len(arr)
+        if n <= lag or n < 4:
+            return 0.0
+        mean = arr.mean()
+        var = arr.var()
+        if var == 0:
+            return 0.0
+        return np.mean((arr[:-lag] - mean) * (arr[lag:] - mean)) / var
+
+    @staticmethod
+    def detect_best_period(
+        data: List[float],
+        candidates: Optional[List[int]] = None,
+        forecast_days: int = 30
+    ) -> dict:
+        """扫描候选周期，返回 strength 最高的那个结果
+
+        白噪声拒识：对每个候选周期计算 lag-k 自相关系数，
+        只接受自相关显著（超出 95% 置信区间）的周期。
+        """
+        if candidates is None:
+            candidates = settings.PERIOD_CANDIDATES
+
+        n = len(data)
+        # 白噪声的 95% 置信区间边界
+        acf_ci = 1.96 / np.sqrt(n) if n > 0 else 1.0
+
+        best = None
+        best_score = -1.0
+        best_period = None
+
+        for period in candidates:
+            if n < period * 2:
+                continue
+            try:
+                result = STLAnalyzer.analyze(data, period, forecast_days)
+                if "error" in result:
+                    continue
+                # lag-k 自相关检验：必须在 95% 置信区间外才算显著
+                lag_k_acf = abs(STLAnalyzer.autocorrelation_at_lag(data, period))
+                if lag_k_acf < acf_ci:
+                    # 该周期的自相关不显著，跳过
+                    continue
+                # 综合评分 = STL strength × lag-k 自相关显著性
+                score = result["strength"] * (lag_k_acf / acf_ci)
+                if score > best_score:
+                    best_score = score
+                    best = result
+                    best_period = period
+            except Exception:
+                continue
+
+        # 白噪声拒识：所有候选周期的自相关都不显著
+        if best is None or best_score < settings.PERIOD_SCAN_MIN_STRENGTH:
+            last_val = float(data[-1]) if len(data) > 0 else 0
+            try:
+                trend_slope = float(np.polyfit(range(len(data)), data, 1)[0])
+            except Exception:
+                trend_slope = 0.0
+            label = "white_noise" if best is None else "low"
+            msg = "数据近似白噪声，无显著周期" if best is None else "未检测到显著周期，使用趋势预测"
+            return {
+                "period": 0,
+                "strength": round(best["strength"] if best else 0.0, 3),
+                "strength_label": label,
+                "seasonal_pattern": [],
+                "trend_last": last_val,
+                "forecast": [round(last_val + trend_slope * (i + 1), 2) for i in range(forecast_days)],
+                "mode": "trend_only",
+                "message": msg,
+                "component_count": len(data),
+                "periods_scanned": candidates,
+            }
+
+        best["periods_scanned"] = candidates
+        return best
     
     @staticmethod
     def analyze(data: List[float], period: int = 7, forecast_days: int = 30) -> dict:

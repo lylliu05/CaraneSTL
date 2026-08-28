@@ -20,11 +20,20 @@ app.add_middleware(
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(request: AnalyzeRequest):
     try:
-        result = STLAnalyzer.analyze(
-            request.data,
-            request.period or 7,
-            request.forecast_days or 30
-        )
+        auto = request.auto_detect if request.auto_detect is not None else True
+        if auto:
+            # 周期扫描选优：自动检测最佳周期
+            result = STLAnalyzer.detect_best_period(
+                request.data,
+                forecast_days=request.forecast_days or 30
+            )
+        else:
+            # 固定周期模式（兼容旧调用）
+            result = STLAnalyzer.analyze(
+                request.data,
+                request.period or 7,
+                request.forecast_days or 30
+            )
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         return AnalyzeResponse(**result)
